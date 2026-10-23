@@ -4,6 +4,14 @@
 <meta charset="utf-8" data-own>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" data-own>
 <title data-own>곡선중 학교스포츠클럽 리그</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#13306E">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="스포츠리그">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com" data-own>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin data-own>
 <link href="https://fonts.googleapis.com/css2?family=Jua&family=Gowun+Dodum&display=swap" rel="stylesheet" data-own>
@@ -436,8 +444,19 @@ body.tot-bg #totbg{display:block}
 body.tot-bg{background:transparent}
 body.tot-bg main .panel{background:color-mix(in srgb,var(--surface) 97%,transparent)}
 body.tot-bg main .note,body.tot-bg main h2{background:color-mix(in srgb,var(--surface) 85%,transparent);border-radius:10px;padding:4px 10px;display:inline-block}
+.teacher-link{text-align:center;margin:26px 0 0}
+.teacher-box{margin-top:22px}
+.tb-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.teacher-box input{font:inherit;font-size:16px;padding:10px 12px;border:2px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);min-width:0;flex:1}
+@media (display-mode: standalone){ body{ -webkit-user-select:none; user-select:none } input,textarea{ -webkit-user-select:text; user-select:text } }
 .token-box{border-color:var(--yellow);box-shadow:0 5px 0 var(--yellow);margin-bottom:16px}
 .token-box input{font:inherit;font-size:16px;padding:10px 12px;border:2px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);min-width:0;flex:1}
+/* ---------- bigger class labels on score cards ---------- */
+.g-names{font-family:"Jua",sans-serif;font-size:18px;color:var(--ink);margin-bottom:6px;align-items:center}
+.g-names span:first-child,.g-names span:last-child{display:inline-block;justify-self:start;padding:3px 14px;border-radius:99px;font-weight:400}
+.g-names span:first-child{background:var(--blue);color:#fff}
+.g-names span:last-child{justify-self:end;background:var(--red);color:#fff}
+@media (max-width:480px){.g-side::before{font-family:"Jua",sans-serif;font-size:17px;color:var(--ink);padding:2px 0 4px}.g-side.A::before{color:var(--blue)}.g-side.B::before{color:var(--red)}}
 /* ---------- custom background (this device only) ---------- */
 .sheet.custom-bg::before{background:var(--bdveil),var(--custombg) center/cover no-repeat,var(--bg)!important}
 .sheet.custom-bg::after{display:none}
@@ -524,8 +543,28 @@ function retryStalled(){ Object.keys(pending).forEach(p=>{ if(!inflight[p]){ ret
 setInterval(()=>{ if(S.db && Object.keys(pending).length) retryStalled(); }, 20000);
 window.addEventListener("online", ()=>{ if(S.db) retryStalled(); });
 document.addEventListener("visibilitychange", ()=>{ if(!document.hidden && S.db && Object.keys(pending).length) retryStalled(); });
+const PEND_KEY="gokseon-unsaved-v1"; const unsaved={};
+function persistUnsaved(){ try{ const ks=Object.keys(unsaved); if(ks.length) localStorage.setItem(PEND_KEY, JSON.stringify(unsaved)); else localStorage.removeItem(PEND_KEY); }catch(e){} }
+function restoreUnsaved(){
+  let o={}; try{ o=JSON.parse(localStorage.getItem(PEND_KEY)||"{}")||{}; }catch(e){ o={}; }
+  let n=0;
+  Object.keys(o).forEach(path=>{
+    const d=o[path]; if(!d || !path.startsWith("matches/")) return;
+    const id=path.slice(8), cur=S.matches[id];
+    if(cur && Number(cur.updatedAt||0)>=Number(d.updatedAt||0)) return;
+    S.matches[id]=clone(d); lastEdit[id]=Date.now(); queueWrite(path,d); n++;
+  });
+  if(n){ render(); if(UI.open) renderSheet(); toast("저장되지 않았던 기록 "+n+"개를 다시 저장합니다."); } else { try{ localStorage.removeItem(PEND_KEY); }catch(e){} }
+}
+function recheckPermission(){
+  if(S.permChecked || !(window.claude && window.claude.use)) return; S.permChecked=true;
+  window.claude.use("user").then(u=>u?u.can("data.write"):null).then(c=>{
+    if(c===false){ S.canWrite=false; setRO(true); render(); toast("이 계정은 보기 권한만 있어 점수를 저장할 수 없습니다. 페이지 주인에게 편집 권한을 받아 주세요."); }
+  }).catch(()=>{});
+}
 function queueWrite(path, data){
   if(!S.db) return;
+  if(path.startsWith("matches/")){ unsaved[path]=data; persistUnsaved(); }
   pending[path] = data; retries[path]=0;
   clearTimeout(timers[path]);
   timers[path] = setTimeout(()=>flush(path), 350);
@@ -533,10 +572,11 @@ function queueWrite(path, data){
 async function flush(path){
   if(inflight[path] || !pending[path]) return;
   const data = pending[path]; delete pending[path]; inflight[path]=true;
-  try{ await S.db.doc(path).set(data); retries[path]=0; if(!S.ro) setSync("저장됨"); }
+  try{ await S.db.doc(path).set(data); retries[path]=0; if(unsaved[path]===data){ delete unsaved[path]; persistUnsaved(); } if(!S.ro) setSync("저장됨"); }
   catch(e){
     const code=(e&&e.code)||"unavailable";
     S.lastErr=path+" · "+code; try{ console.warn("save failed",path,code,e&&e.message); }catch(_){}
+    if(!S.sheet && code!=="bad_token") recheckPermission();
     if(code==="bad_token"){ pending[path]=pending[path]||data; retries[path]=1; const was=S.needToken; S.needToken=true; if(was) return; render(); toast("관리자 비밀번호가 맞지 않아 저장하지 못했습니다. 화면 위에서 다시 입력해 주세요."); return; }
     if(["not_granted","revoked","capability_removed","capability_disabled"].includes(code)){
       if(path.startsWith("league/")){ toast("설정은 이 페이지의 편집자만 바꿀 수 있습니다."); }
@@ -636,7 +676,9 @@ async function initDb(){
     Object.keys(S.matches).forEach(id=>{ const p="matches/"+id; if(pending[p]||inflight[p]||Date.now()-(lastEdit[id]||0)<3000) m[id]=S.matches[id]; });
     if(UI.open && !m[UI.open] && S.matches[UI.open]) m[UI.open]=S.matches[UI.open];
     const before = UI.open ? canon(S.matches[UI.open]||null) : null;
-    S.matches=m; if(!["es","qr","setup","share"].includes(UI.tab) && !(UI.tab==="sched"&&UI.schedEdit)) render();
+    S.matches=m;
+    if(!S.restoreDone && S.canWrite){ S.restoreDone=true; setTimeout(restoreUnsaved,300); }
+    if(!["es","qr","setup","share"].includes(UI.tab) && !(UI.tab==="sched"&&UI.schedEdit)) render();
     if(UI.open && canon(S.matches[UI.open]||null)!==before) renderSheet(true);
   }, ()=>setSync("경기 기록을 불러오지 못했습니다"));
   db.collection("esports").onSnapshot(snap=>{
@@ -854,6 +896,11 @@ function render(){
   if(S.sheet && S.sheetAdmin && S.needToken){
     $main.insertAdjacentHTML("afterbegin",`<div class="panel token-box"><b>🔑 관리자 비밀번호</b><p class="note" style="margin:4px 0 10px">구글 시트에 점수를 저장하려면 Apps Script에서 정한 관리자 비밀번호를 한 번 입력해 주세요. 이 기기에만 기억됩니다.</p>
       <div class="actions" style="margin:0"><input type="password" id="tokenIn" autocomplete="off" placeholder="비밀번호"><button class="primary" data-token-save>저장</button></div></div>`);
+  }
+  if(S.sheet && !S.sheetAdmin && !S.preview){
+    $main.insertAdjacentHTML("beforeend", UI.teacherForm
+      ? `<div class="panel teacher-box"><b>🔑 선생님 입력 모드</b><p class="note" style="margin:4px 0 10px">관리자 비밀번호를 넣으면 이 기기(이 앱)에서 점수를 입력할 수 있습니다.</p><div class="tb-row"><input type="password" id="teacherPw" autocomplete="off" placeholder="관리자 비밀번호"><button class="primary" data-teacher-go>입력 모드 켜기</button><button class="ghost" data-teacher-x>취소</button></div></div>`
+      : `<div class="teacher-link"><button class="ghost sm" data-teacher-open>🔒 선생님 입력 모드</button></div>`);
   }
   let pb=document.getElementById("pvbar");
   if(S.preview){
@@ -1124,7 +1171,7 @@ function renderSetup(){
       <li>E-스포츠(마리오카트): 그랑프리 모드 단판, 최종 순위로 결정합니다.</li>
     </ul></div>
     <p class="note">${S.sheet?"점수는 구글 시트에 저장되고, 선생님용 주소(?admin)에서 관리자 비밀번호를 넣은 기기에서만 입력할 수 있습니다.":S.mode==="db"?"점수는 이 페이지를 연 모든 사람에게 실시간으로 공유됩니다. 학생 심판이 입력하려면 페이지 공유 시 편집 권한을 주세요.":"지금은 이 기기의 브라우저에만 저장됩니다."}</p>
-    ${S.mode==="gh"?`<div class="actions"><button class="ghost" data-admin-off>관리자 모드 끄기 (이 기기)</button></div>`:""}
+    ${(S.mode==="gh"||S.sheet)?`<div class="actions"><button class="ghost" data-admin-off>선생님 입력 모드 끄기 (이 기기)</button></div>`:""}
   </section>`;
 }
 
@@ -1495,6 +1542,9 @@ document.addEventListener("click",e=>{
   if(t.hasAttribute("data-export")){ exportFile(t); return; }
   if(t.hasAttribute("data-save-csv")){ exportCsv(); return; }
   if(t.hasAttribute("data-token-save")){ const v=(document.getElementById("tokenIn")||{}).value||""; if(!v.trim()){ toast("비밀번호를 입력해 주세요."); return; } try{ localStorage.setItem(TOKEN_KEY,v.trim()); }catch(e){} S.needToken=false; render(); toast("저장했습니다. 이제 점수가 구글 시트에 저장됩니다."); Object.keys(pending).forEach(pth=>{ clearTimeout(timers[pth]); retries[pth]=0; flush(pth); }); return; }
+  if(t.hasAttribute("data-teacher-open")){ UI.teacherForm=true; render(); setTimeout(()=>{ const i=document.getElementById("teacherPw"); if(i) i.focus(); },0); return; }
+  if(t.hasAttribute("data-teacher-x")){ UI.teacherForm=false; render(); return; }
+  if(t.hasAttribute("data-teacher-go")){ const v=((document.getElementById("teacherPw")||{}).value||"").trim(); if(!v){ toast("비밀번호를 입력해 주세요."); return; } try{ localStorage.setItem(TOKEN_KEY,v); localStorage.setItem(ADMIN_KEY,"1"); }catch(e){} location.reload(); return; }
   if(t.hasAttribute("data-token-reset")){ try{ localStorage.removeItem(TOKEN_KEY); }catch(e){} S.needToken=true; render(); return; }
   if(t.dataset.bgpick){ const f=document.querySelector(`input[data-bgfile="${t.dataset.bgpick}"]`); if(f){ f.value=""; f.click(); } return; }
   if(t.dataset.bgclear){ try{ localStorage.removeItem("gokseon-bg-"+t.dataset.bgclear); }catch(e){} toast("기본 배경으로 되돌렸습니다."); render(); return; }
@@ -1505,7 +1555,7 @@ document.addEventListener("click",e=>{
   if(t.hasAttribute("data-sched-reset-yes")){ S.schedResetAsk=false; S.config.schedule=clone(PLAN_SCHEDULE); saveConfig(); render(); toast("계획서 일정으로 되돌렸습니다."); return; }
   if(t.dataset.goes){ UI.grade=t.dataset.goes; UI.tab="es"; render(); window.scrollTo(0,0); return; }
   if(t.hasAttribute("data-ghjson")){ exportDataJson(); return; }
-  if(t.hasAttribute("data-admin-off")){ try{ localStorage.removeItem(ADMIN_KEY); }catch(e){} location.href=location.pathname; return; }
+  if(t.hasAttribute("data-admin-off")){ try{ localStorage.removeItem(ADMIN_KEY); localStorage.removeItem(TOKEN_KEY); }catch(e){} location.href=location.pathname; return; }
   if(t.hasAttribute("data-import-yes")){ applyImport(); return; }
   if(t.hasAttribute("data-import-no")){ S.pendingImport=null; render(); return; }
   if(t.hasAttribute("data-save-json")){ exportJson(); return; }
@@ -1593,6 +1643,7 @@ function commitSv(m,t){ const s=m.sets[+t.dataset.si], k=t.dataset.sv; if(!s || 
   s[k]=nv; delete s[k+"B"]; delete s[k+"G"]; s.pick=null; return true; }
 let toastT; function toast(m){ const el=document.getElementById("toast"); el.textContent=m; el.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove("show"),2600); }
 
+if("serviceWorker" in navigator && location.protocol==="https:" && !window.claude){ window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(()=>{}); }); }
 initDb();
 })();
 </script>

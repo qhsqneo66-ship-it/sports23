@@ -1,0 +1,26 @@
+{
+ "app": "gokseon-league",
+ "version": 1,
+ "savedAt": null,
+ "publicUrl": "",
+ "config": {
+  "classes": {
+   "1": 3,
+   "2": 3,
+   "3": 3
+  },
+  "dodgeStart": {
+   "boys": 10,
+   "girls": 10
+  },
+  "otherPoints": 0,
+  "points": [
+   5,
+   4,
+   3
+  ],
+  "setMinutes": 4
+ },
+ "matches": {},
+ "esports": {}
+}
